@@ -1,4 +1,4 @@
-import { centsFromAmount } from "../domain/money";
+import { addCents, centsFromAmount, type Cents } from "../domain/money";
 import {
   PREPAYMENT_STRATEGY,
   validateTerms,
@@ -7,8 +7,9 @@ import {
   type PrepaymentStrategy,
   type ValidationError,
 } from "../domain/loan";
+import type { LoanCharges } from "../domain/charges";
 import { comparePrepayment, type PrepaymentComparison, type ScheduleRow } from "../domain/schedule";
-import { exportScheduleToExcel } from "./exportExcel";
+import { canUseFormulas, exportScheduleToExcel } from "./exportExcel";
 import { CURRENCY, formatDuration, formatMoney, isCurrencyCode, type CurrencyCode } from "./format";
 
 type ElementConstructor<TElement extends Element> = abstract new () => TElement;
@@ -30,11 +31,20 @@ function requireElement<TElement extends Element>(
   return found;
 }
 
+function numberFrom(input: HTMLInputElement): number {
+  const parsed = Number.parseFloat(input.value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 const form = requireElement("#loan-form", HTMLFormElement);
 const principalInput = requireElement("#principal", HTMLInputElement);
 const rateInput = requireElement("#annual-rate", HTMLInputElement);
 const termInput = requireElement("#term-months", HTMLInputElement);
 const currencySelect = requireElement("#currency", HTMLSelectElement);
+const lifeInsuranceInput = requireElement("#life-insurance", HTMLInputElement);
+const damageInsuranceInput = requireElement("#damage-insurance", HTMLInputElement);
+const adminFeeInput = requireElement("#admin-fee", HTMLInputElement);
+const originationInput = requireElement("#origination", HTMLInputElement);
 const extrasList = requireElement("#extra-payments", HTMLElement);
 const extraTemplate = requireElement("#extra-row-template", HTMLTemplateElement);
 const addExtraButton = requireElement("#add-extra", HTMLButtonElement);
@@ -47,11 +57,15 @@ const scheduleScroll = requireElement("#schedule-scroll", HTMLElement);
 const exportButton = requireElement("#export-excel", HTMLButtonElement);
 const exportDialog = requireElement("#export-dialog", HTMLDialogElement);
 const exportTitleInput = requireElement("#export-title", HTMLInputElement);
+const formulaCheckbox = requireElement("#export-formulas", HTMLInputElement);
+const formulaNote = requireElement("#export-formulas-note", HTMLElement);
 
 const output = {
   payment: requireElement("#out-payment", HTMLElement),
+  effective: requireElement("#out-effective", HTMLElement),
+  effectiveHint: requireElement("#out-effective-hint", HTMLElement),
   term: requireElement("#out-term", HTMLElement),
-  interest: requireElement("#out-interest", HTMLElement),
+  creditCost: requireElement("#out-credit-cost", HTMLElement),
   total: requireElement("#out-total", HTMLElement),
   interestSaved: requireElement("#out-interest-saved", HTMLElement),
   monthsSaved: requireElement("#out-months-saved", HTMLElement),
@@ -74,6 +88,15 @@ function readStrategy(): PrepaymentStrategy {
     checked.value === PREPAYMENT_STRATEGY.reducePayment
     ? PREPAYMENT_STRATEGY.reducePayment
     : PREPAYMENT_STRATEGY.reduceTerm;
+}
+
+function readCharges(): LoanCharges {
+  return {
+    lifeInsurancePerMille: numberFrom(lifeInsuranceInput),
+    damageInsurance: centsFromAmount(numberFrom(damageInsuranceInput)),
+    adminFee: centsFromAmount(numberFrom(adminFeeInput)),
+    originationPercent: numberFrom(originationInput),
+  };
 }
 
 function readExtraPayments(): readonly ExtraPayment[] {
@@ -103,6 +126,7 @@ function readTerms(): LoanTerms {
     termMonths: Number.parseInt(termInput.value, 10),
     extraPayments: readExtraPayments(),
     strategy: readStrategy(),
+    charges: readCharges(),
   };
 }
 
@@ -159,9 +183,14 @@ function renderSchedule(rows: readonly ScheduleRow[], currency: CurrencyCode): v
     period.textContent = String(row.period);
     tableRow.append(period);
 
-    appendCell(tableRow, formatMoney(row.payment, currency));
+    appendCell(tableRow, formatMoney(row.totalDue, currency), "font-medium");
     appendCell(tableRow, formatMoney(row.interest, currency), "text-rose-600 dark:text-rose-400");
     appendCell(tableRow, formatMoney(row.principal, currency), "text-sky-700 dark:text-sky-400");
+    appendCell(
+      tableRow,
+      row.charges > 0 ? formatMoney(row.charges, currency) : "·",
+      row.charges > 0 ? "text-amber-700 dark:text-amber-400" : "text-slate-300",
+    );
     appendCell(
       tableRow,
       row.extra > 0 ? formatMoney(row.extra, currency) : "·",
@@ -178,15 +207,32 @@ function renderSchedule(rows: readonly ScheduleRow[], currency: CurrencyCode): v
   scheduleScroll.scrollTop = 0;
 }
 
-function renderSummary(comparison: PrepaymentComparison, currency: CurrencyCode): void {
+function renderSummary(
+  comparison: PrepaymentComparison,
+  terms: LoanTerms,
+  currency: CurrencyCode,
+): void {
   const { withExtras, interestSaved, monthsSaved } = comparison;
+  const firstInstalment: Cents = addCents(withExtras.firstPayment, withExtras.firstCharges);
+  const creditCost: Cents = addCents(
+    addCents(withExtras.totalInterest, withExtras.totalCharges),
+    withExtras.originationFee,
+  );
 
-  output.payment.textContent = formatMoney(withExtras.firstPayment, currency);
+  output.payment.textContent = formatMoney(firstInstalment, currency);
+  output.effective.textContent = `${withExtras.effectiveAnnualRatePercent.toFixed(2)} %`;
+  output.effectiveHint.textContent = `nominal ${terms.annualRatePercent} %`;
   output.term.textContent = formatDuration(withExtras.months);
-  output.interest.textContent = formatMoney(withExtras.totalInterest, currency);
-  output.total.textContent = formatMoney(withExtras.totalPaid, currency);
+  output.creditCost.textContent = formatMoney(creditCost, currency);
+  output.total.textContent = formatMoney(withExtras.totalCost, currency);
 
-  for (const value of [output.payment, output.term, output.interest, output.total]) {
+  for (const value of [
+    output.payment,
+    output.effective,
+    output.term,
+    output.creditCost,
+    output.total,
+  ]) {
     pulse(value);
   }
 
@@ -198,9 +244,9 @@ function renderSummary(comparison: PrepaymentComparison, currency: CurrencyCode)
   }
 
   statusRegion.textContent =
-    `Cuota mensual ${formatMoney(withExtras.firstPayment, currency)}. ` +
-    `Plazo ${formatDuration(withExtras.months)}. ` +
-    `Intereses totales ${formatMoney(withExtras.totalInterest, currency)}.`;
+    `Cuota mensual ${formatMoney(firstInstalment, currency)}. ` +
+    `Tasa efectiva ${withExtras.effectiveAnnualRatePercent.toFixed(2)} por ciento. ` +
+    `Plazo ${formatDuration(withExtras.months)}.`;
 }
 
 function calculate(): void {
@@ -218,7 +264,7 @@ function calculate(): void {
   const currency = readCurrency();
   const comparison = comparePrepayment(validation.value);
 
-  renderSummary(comparison, currency);
+  renderSummary(comparison, validation.value, currency);
   renderSchedule(comparison.withExtras.rows, currency);
   resultsPanel.hidden = false;
   lastResult = { terms: validation.value, comparison };
@@ -267,7 +313,8 @@ async function runExport(): Promise<void> {
       title: exportTitleInput.value.trim(),
       comparison: lastResult.comparison,
       currency: readCurrency(),
-      annualRatePercent: lastResult.terms.annualRatePercent,
+      terms: lastResult.terms,
+      useFormulas: formulaCheckbox.checked,
     });
     statusRegion.textContent = "Archivo de Excel descargado.";
   } catch (error) {
@@ -283,6 +330,15 @@ addExtraButton.addEventListener("click", addExtraPaymentRow);
 
 exportButton.addEventListener("click", () => {
   if (lastResult === null) return;
+
+  // Formulas assume one fixed installment for the whole loan, which the
+  // "reduce the installment" strategy breaks. Say so instead of exporting a
+  // sheet that quietly disagrees with the table on screen.
+  const formulasPossible = canUseFormulas(lastResult.terms);
+  formulaCheckbox.disabled = !formulasPossible;
+  if (!formulasPossible) formulaCheckbox.checked = false;
+  formulaNote.hidden = formulasPossible;
+
   exportDialog.showModal();
   exportTitleInput.select();
 });
