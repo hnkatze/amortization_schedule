@@ -1,0 +1,396 @@
+---
+const field =
+  "w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 tabular-nums " +
+  "transition-[border-color,box-shadow] duration-150 hover:border-slate-400 " +
+  "outline-none focus-visible:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500/40 " +
+  "dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-slate-600";
+
+const label = "block text-xs font-medium text-slate-600 dark:text-slate-400";
+
+const legend = "text-sm font-semibold text-slate-900 dark:text-slate-100";
+
+const card =
+  "rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900";
+
+const summaryColumns = [
+  { id: "out-payment", title: "Cuota mensual", tone: "text-slate-900 dark:text-slate-50" },
+  { id: "out-term", title: "Plazo real", tone: "text-slate-900 dark:text-slate-50" },
+  // The interest total is the number the whole tool exists to expose, so it is
+  // the only one that carries colour.
+  { id: "out-interest", title: "Intereses totales", tone: "text-rose-600 dark:text-rose-400" },
+  { id: "out-total", title: "Total a pagar", tone: "text-slate-900 dark:text-slate-50" },
+];
+
+const columns = ["Mes", "Cuota", "Interés", "Capital", "Abono", "Saldo"];
+---
+
+{/*
+  Every ancestor in the height chain carries `min-h-0`. A grid/flex child
+  defaults to `min-height: auto`, which refuses to shrink below its content —
+  so without it the scroll containers never activate and the whole column grows
+  past the viewport instead, which is exactly the page scroll being removed.
+*/}
+<form
+  id="loan-form"
+  class="grid gap-6 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,21rem)_minmax(0,1fr)]"
+  novalidate
+>
+  <div class="scroll-slim flex flex-col gap-4 lg:min-h-0 lg:overflow-y-auto lg:pr-2">
+    <fieldset class={card}>
+      <legend class={legend}>Datos del préstamo</legend>
+
+      <div class="mt-3 flex flex-col gap-3">
+        <div class="grid grid-cols-[minmax(0,1fr)_9rem] gap-2">
+          <div>
+            <label class={label} for="principal">Monto del préstamo</label>
+            <input
+              class={`mt-1 ${field}`}
+              id="principal"
+              name="principal"
+              type="number"
+              inputmode="decimal"
+              min="1"
+              step="0.01"
+              value="250000"
+              required
+              autocomplete="off"
+            />
+          </div>
+
+          <div>
+            <label class={label} for="currency">Moneda</label>
+            <select class={`select-field mt-1 ${field}`} id="currency" name="currency">
+              <option value="HNL">L — Lempira</option>
+              <option value="USD">$ — Dólar</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class={label} for="annual-rate">Tasa de interés anual (%)</label>
+          <input
+            class={`mt-1 ${field}`}
+            id="annual-rate"
+            name="annual-rate"
+            type="number"
+            inputmode="decimal"
+            min="0"
+            step="0.01"
+            value="18"
+            required
+            autocomplete="off"
+          />
+          <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            La tasa nominal que te da el banco, sin seguros ni comisiones.
+          </p>
+        </div>
+
+        <div>
+          <label class={label} for="term-months">Plazo (meses)</label>
+          <input
+            class={`mt-1 ${field}`}
+            id="term-months"
+            name="term-months"
+            type="number"
+            inputmode="numeric"
+            min="1"
+            max="600"
+            step="1"
+            value="60"
+            required
+            autocomplete="off"
+          />
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset class={card}>
+      <legend class={legend}>Abonos a capital</legend>
+      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        Van directo al capital. Cuanto más temprano, más ahorrás.
+      </p>
+
+      <fieldset class="mt-3 border-0 p-0">
+        <legend class={label}>¿Qué querés que haga el abono?</legend>
+
+        <div class="mt-1.5 flex flex-col gap-1.5">
+          <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+            <input
+              class="accent-sky-600"
+              type="radio"
+              name="strategy"
+              value="reduce-term"
+              checked
+            />
+            <span>
+              Reducir el plazo
+              <span class="text-xs text-slate-500 dark:text-slate-400">— terminás antes</span>
+            </span>
+          </label>
+
+          <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+            <input class="accent-sky-600" type="radio" name="strategy" value="reduce-payment" />
+            <span>
+              Reducir la cuota
+              <span class="text-xs text-slate-500 dark:text-slate-400">— pagás menos al mes</span>
+            </span>
+          </label>
+        </div>
+      </fieldset>
+
+      <div class="mt-3 flex flex-col gap-2" id="extra-payments"></div>
+
+      <button
+        class="mt-3 w-full rounded-lg border border-dashed border-slate-400 px-3 py-1.5 text-sm font-medium text-slate-700 outline-none hover:border-sky-500 hover:text-sky-700 focus-visible:ring-2 focus-visible:ring-sky-500/40 dark:border-slate-600 dark:text-slate-300 dark:hover:text-sky-400"
+        id="add-extra"
+        type="button"
+      >
+        Agregar un abono
+      </button>
+    </fieldset>
+
+    <button
+      class="rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm outline-none hover:bg-sky-700 focus-visible:ring-2 focus-visible:ring-sky-500/50 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950"
+      type="submit"
+    >
+      Calcular
+    </button>
+
+    <div
+      class="rounded-lg border border-rose-300 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-200"
+      id="form-errors"
+      role="alert"
+      hidden
+    >
+    </div>
+  </div>
+
+  <div class="animate-fade-rise flex flex-col gap-4 lg:min-h-0" id="results" hidden>
+    <p class="sr-only" id="calc-status" role="status" aria-live="polite"></p>
+
+    {/*
+      `gap-px` over a tinted background paints hairline dividers between the
+      stats without giving each one its own border box.
+    */}
+    <dl
+      class="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200 lg:shrink-0 xl:grid-cols-4 dark:border-slate-800 dark:bg-slate-800"
+    >
+      {
+        summaryColumns.map((column) => (
+          <div class="bg-white px-4 py-3 dark:bg-slate-900">
+            <dt class="text-xs font-medium text-slate-500 dark:text-slate-400">{column.title}</dt>
+            <dd class={`mt-0.5 text-lg font-bold tabular-nums ${column.tone}`} id={column.id}>
+              —
+            </dd>
+          </div>
+        ))
+      }
+    </dl>
+
+    <div
+      class="rounded-xl border border-emerald-300 bg-emerald-50 p-4 lg:shrink-0 dark:border-emerald-800 dark:bg-emerald-950/40"
+      id="savings"
+      hidden
+    >
+      <h2 class="text-base font-semibold text-emerald-900 dark:text-emerald-200">
+        Lo que te ahorran los abonos
+      </h2>
+      <dl class="mt-2 grid gap-4 sm:grid-cols-2">
+        <div>
+          <dt class="text-xs font-medium text-emerald-800 dark:text-emerald-300">
+            Intereses que ya no pagás
+          </dt>
+          <dd
+            class="text-xl font-bold text-emerald-900 tabular-nums dark:text-emerald-100"
+            id="out-interest-saved"
+          >
+            —
+          </dd>
+        </div>
+        <div>
+          <dt class="text-xs font-medium text-emerald-800 dark:text-emerald-300">
+            Tiempo que te quitás de encima
+          </dt>
+          <dd
+            class="text-xl font-bold text-emerald-900 tabular-nums dark:text-emerald-100"
+            id="out-months-saved"
+          >
+            —
+          </dd>
+        </div>
+      </dl>
+    </div>
+
+    <div class={`${card} flex flex-col p-0 lg:min-h-0 lg:flex-1`}>
+      <div class="flex shrink-0 items-start justify-between gap-3 px-4 py-3">
+        <div>
+          <h2 class="font-semibold text-slate-900 dark:text-slate-100" id="schedule-title">
+            Tabla de amortización
+          </h2>
+          <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            Las filas en verde son los meses con abono a capital. La tabla tiene su propio scroll:
+            enfocala con Tab y movete con las flechas.
+          </p>
+        </div>
+
+        <button
+          class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-800 transition-colors duration-150 outline-none hover:border-emerald-400 hover:bg-emerald-100 focus-visible:ring-2 focus-visible:ring-emerald-500/40 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200 dark:hover:bg-emerald-900/60"
+          id="export-excel"
+          type="button"
+          disabled
+        >
+          <svg
+            class="size-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Descargar Excel
+        </button>
+      </div>
+
+      {/*
+        A scrollable box that is not focusable is unreachable for anyone without
+        a mouse, so it gets tabindex="0". A focusable container needs a role and
+        a name to make sense in the accessibility tree, hence role="region"
+        pointing at the visible heading.
+      */}
+      <div
+        class="scroll-slim max-h-[60vh] overflow-auto border-t border-slate-200 focus-visible:ring-2 focus-visible:ring-sky-500/40 focus-visible:ring-inset focus-visible:outline-none lg:max-h-none lg:min-h-0 lg:flex-1 dark:border-slate-800"
+        id="schedule-scroll"
+        role="region"
+        aria-labelledby="schedule-title"
+        tabindex="0"
+      >
+        <table class="w-full min-w-[44rem] border-collapse text-sm" aria-labelledby="schedule-title">
+          <thead>
+            <tr>
+              {
+                columns.map((column, index) => (
+                  <th
+                    class={`schedule-head-cell sticky top-0 z-10 bg-slate-50 px-3 py-2 text-xs font-semibold tracking-wide text-slate-600 uppercase dark:bg-slate-800 dark:text-slate-300 ${index === 0 ? "text-left" : "text-right"}`}
+                    scope="col"
+                  >
+                    {column}
+                  </th>
+                ))
+              }
+            </tr>
+          </thead>
+          <tbody class="text-slate-700 dark:text-slate-300" id="schedule-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</form>
+
+{/*
+  Outside the calculator form on purpose: a <form> inside another <form> is
+  invalid HTML and the parser silently drops the inner one.
+
+  Native <dialog> + showModal() brings the focus trap, Escape-to-close, inert
+  background and backdrop for free, and `method="dialog"` reports which button
+  closed it through `returnValue`.
+*/}
+<dialog
+  class="m-auto w-[min(26rem,92vw)] rounded-xl border border-slate-200 bg-white p-0 text-slate-900 shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+  id="export-dialog"
+  aria-labelledby="export-dialog-title"
+>
+  <form class="flex flex-col gap-4 p-5" method="dialog">
+    <div>
+      <h2 class="text-base font-semibold" id="export-dialog-title">Descargar Excel</h2>
+      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        El nombre se usa como título dentro de la hoja y como nombre del archivo.
+      </p>
+    </div>
+
+    <div>
+      <label class={label} for="export-title">Título</label>
+      <input
+        class={`mt-1 ${field}`}
+        id="export-title"
+        name="export-title"
+        type="text"
+        value="Tabla de amortización"
+        maxlength="80"
+        autocomplete="off"
+      />
+    </div>
+
+    <div class="flex justify-end gap-2">
+      <button
+        class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors duration-150 outline-none hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-slate-400/40 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+        type="submit"
+        value="cancel"
+      >
+        Cancelar
+      </button>
+      <button
+        class="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white transition-colors duration-150 outline-none hover:bg-emerald-700 focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+        type="submit"
+        value="confirm"
+      >
+        Descargar
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<template id="extra-row-template">
+  <div
+    class="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] items-end gap-2 rounded-lg border border-slate-200 p-2.5 dark:border-slate-700"
+    data-extra-row
+  >
+    <div>
+      <label
+        class="block text-xs font-medium text-slate-600 dark:text-slate-400"
+        data-extra-period-label></label>
+      <input
+        class="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 tabular-nums outline-none focus-visible:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500/40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+        type="number"
+        inputmode="numeric"
+        min="1"
+        step="1"
+        value="12"
+        autocomplete="off"
+        data-extra-period
+      />
+    </div>
+    <div>
+      <label
+        class="block text-xs font-medium text-slate-600 dark:text-slate-400"
+        data-extra-amount-label></label>
+      <input
+        class="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 tabular-nums outline-none focus-visible:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500/40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+        type="number"
+        inputmode="decimal"
+        min="0.01"
+        step="0.01"
+        value="20000"
+        autocomplete="off"
+        data-extra-amount
+      />
+    </div>
+    <button
+      class="rounded-md border border-slate-300 px-2 py-1.5 text-sm text-slate-600 outline-none hover:border-rose-400 hover:text-rose-600 focus-visible:ring-2 focus-visible:ring-rose-500/40 dark:border-slate-700 dark:text-slate-400"
+      type="button"
+      data-remove-extra
+    >
+      Quitar
+    </button>
+  </div>
+</template>
+
+<script>
+  import "./calculator";
+</script>

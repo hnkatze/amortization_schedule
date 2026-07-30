@@ -1,0 +1,164 @@
+@import "tailwindcss";
+
+@layer base {
+  /*
+   * A display utility (grid, flex, block) outranks the user-agent rule for
+   * [hidden], so an element carrying both `hidden` and `class="grid"` stays
+   * visible. Result panels here are toggled through the `hidden` property, so
+   * that attribute has to win.
+   */
+  [hidden] {
+    display: none !important;
+  }
+
+  /*
+   * Spinner arrows fight the right-aligned numbers and are redundant: arrow
+   * keys still step the value, so nothing is lost for keyboard users.
+   */
+  input[type="number"] {
+    appearance: textfield;
+  }
+
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+
+  /* Respect the OS setting instead of animating over someone who asked us not to. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /*
+   * A sticky <th> loses its bottom border while the table scrolls: with
+   * `border-collapse: collapse` the border belongs to the collapsed grid, not
+   * to the sticky cell, so it stays behind with the rows. An inset shadow is
+   * painted by the cell itself and therefore travels with it.
+   */
+  .schedule-head-cell {
+    box-shadow: inset 0 -1px 0 var(--color-slate-200);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .schedule-head-cell {
+      box-shadow: inset 0 -1px 0 var(--color-slate-700);
+    }
+  }
+
+  /*
+   * `scrollbar-width`/`scrollbar-color` is the standard property (Firefox, and
+   * Chrome 121+). The ::-webkit- rules cover older WebKit, which ignores the
+   * standard one. Both are needed for the bar to look the same everywhere.
+   */
+  .scroll-slim {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-sky-400) transparent;
+  }
+
+  .scroll-slim::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+  }
+
+  .scroll-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scroll-slim::-webkit-scrollbar-thumb {
+    background-color: var(--color-sky-400);
+    border-radius: var(--radius-full);
+  }
+
+  .scroll-slim::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-sky-500);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .scroll-slim {
+      scrollbar-color: var(--color-sky-500) transparent;
+    }
+
+    .scroll-slim::-webkit-scrollbar-thumb {
+      background-color: var(--color-sky-500);
+    }
+  }
+
+  /* The chevron is inlined as a data URI: an external request would be blocked
+     and would cost a round trip for 200 bytes of icon. */
+  .select-field {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    background-size: 0.9rem;
+    padding-right: 2rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .select-field {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    }
+  }
+}
+
+@layer utilities {
+  @keyframes fade-rise {
+    from {
+      opacity: 0;
+      transform: translateY(0.5rem);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .animate-fade-rise {
+    animation: fade-rise 0.35s ease-out both;
+  }
+
+  /* A short wash of colour marks which numbers just changed. */
+  @keyframes value-pulse {
+    from {
+      background-color: color-mix(in oklab, var(--color-sky-400) 40%, transparent);
+    }
+    to {
+      background-color: transparent;
+    }
+  }
+
+  .value-pulse {
+    animation: value-pulse 0.65s ease-out;
+    border-radius: var(--radius-sm);
+  }
+
+  @keyframes dialog-in {
+    from {
+      opacity: 0;
+      transform: translateY(0.5rem) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  dialog[open] {
+    animation: dialog-in 0.2s ease-out;
+  }
+
+  dialog::backdrop {
+    background-color: color-mix(in oklab, var(--color-slate-950) 55%, transparent);
+    backdrop-filter: blur(2px);
+  }
+}
