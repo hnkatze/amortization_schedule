@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { centsFromAmount, toAmount, type Cents } from "./money";
 import { PREPAYMENT_STRATEGY, type LoanTerms } from "./loan";
+import { NO_CHARGES, type LoanCharges } from "./charges";
 import { annuityPayment, buildSchedule, comparePrepayment, monthlyRate } from "./schedule";
 
 function terms(overrides: Partial<LoanTerms> = {}): LoanTerms {
@@ -10,8 +11,13 @@ function terms(overrides: Partial<LoanTerms> = {}): LoanTerms {
     termMonths: 12,
     extraPayments: [],
     strategy: PREPAYMENT_STRATEGY.reduceTerm,
+    charges: NO_CHARGES,
     ...overrides,
   };
+}
+
+function charges(overrides: Partial<LoanCharges> = {}): LoanCharges {
+  return { ...NO_CHARGES, ...overrides };
 }
 
 const lastRow = <TRow,>(rows: readonly TRow[]): TRow => {
@@ -146,6 +152,93 @@ describe("prepayment strategies", () => {
     );
 
     expect(early.totalInterest).toBeLessThan(late.totalInterest);
+  });
+});
+
+describe("charges", () => {
+  it("leaves the amortization untouched — only the outflow grows", () => {
+    const bare = buildSchedule(terms({ termMonths: 60 }));
+    const charged = buildSchedule(
+      terms({ termMonths: 60, charges: charges({ adminFee: centsFromAmount(150) }) }),
+    );
+
+    expect(charged.months).toBe(bare.months);
+    expect(charged.totalInterest).toBe(bare.totalInterest);
+    expect(charged.rows.map((row) => row.closingBalance)).toEqual(
+      bare.rows.map((row) => row.closingBalance),
+    );
+    expect(charged.totalPaid).toBeGreaterThan(bare.totalPaid);
+  });
+
+  it("charges a fixed fee identically every period", () => {
+    const schedule = buildSchedule(
+      terms({ termMonths: 24, charges: charges({ adminFee: centsFromAmount(150) }) }),
+    );
+
+    for (const row of schedule.rows) {
+      expect(toAmount(row.charges)).toBeCloseTo(150, 2);
+    }
+    expect(toAmount(schedule.totalCharges)).toBeCloseTo(150 * 24, 2);
+  });
+
+  it("shrinks life insurance as the balance is repaid", () => {
+    const schedule = buildSchedule(
+      terms({ termMonths: 60, charges: charges({ lifeInsurancePerMille: 0.85 }) }),
+    );
+    const first = schedule.rows[0];
+    const last = lastRow(schedule.rows);
+    if (first === undefined) throw new Error("expected a first row");
+
+    // 100,000 owed at 0.85 per thousand is 85.00 in the first period.
+    expect(toAmount(first.charges)).toBeCloseTo(85, 2);
+    expect(last.charges).toBeLessThan(first.charges);
+  });
+
+  it("takes the origination fee once, not monthly", () => {
+    const schedule = buildSchedule(
+      terms({ termMonths: 12, charges: charges({ originationPercent: 2 }) }),
+    );
+
+    expect(toAmount(schedule.originationFee)).toBeCloseTo(2_000, 2);
+    expect(schedule.totalCharges).toBe(0);
+    expect(schedule.totalCost).toBe(schedule.totalPaid + schedule.originationFee);
+  });
+
+  it("reports the effective rate as the nominal rate when nothing is charged", () => {
+    const schedule = buildSchedule(terms({ termMonths: 60 }));
+    expect(schedule.effectiveAnnualRatePercent).toBeCloseTo(12.68, 1);
+  });
+
+  it("reports an effective rate above nominal once charges apply", () => {
+    const bare = buildSchedule(terms({ termMonths: 60 }));
+    const charged = buildSchedule(
+      terms({
+        termMonths: 60,
+        charges: charges({
+          lifeInsurancePerMille: 0.85,
+          adminFee: centsFromAmount(150),
+          originationPercent: 2,
+        }),
+      }),
+    );
+
+    expect(charged.effectiveAnnualRatePercent).toBeGreaterThan(
+      bare.effectiveAnnualRatePercent,
+    );
+  });
+
+  it("prices an interest-free loan that only carries a fee", () => {
+    const schedule = buildSchedule(
+      terms({
+        annualRatePercent: 0,
+        termMonths: 12,
+        charges: charges({ adminFee: centsFromAmount(500) }),
+      }),
+    );
+
+    expect(schedule.totalInterest).toBe(0);
+    // Paying 500 a month on top of a free loan is not free.
+    expect(schedule.effectiveAnnualRatePercent).toBeGreaterThan(0);
   });
 });
 

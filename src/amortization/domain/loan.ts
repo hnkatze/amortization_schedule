@@ -1,4 +1,5 @@
 import type { Cents } from "./money";
+import type { LoanCharges } from "./charges";
 
 /**
  * What the borrower does with an extra principal payment.
@@ -35,6 +36,7 @@ export type LoanTerms = {
   readonly termMonths: number;
   readonly extraPayments: readonly ExtraPayment[];
   readonly strategy: PrepaymentStrategy;
+  readonly charges: LoanCharges;
 };
 
 export type ValidationError = {
@@ -66,6 +68,27 @@ export function validateTerms(terms: LoanTerms): Validated<LoanTerms> {
     errors.push({
       field: "termMonths",
       message: `El plazo no puede superar ${MAX_TERM_MONTHS} meses.`,
+    });
+  }
+
+  const { charges } = terms;
+  if (!Number.isFinite(charges.lifeInsurancePerMille) || charges.lifeInsurancePerMille < 0) {
+    errors.push({ field: "charges", message: "El seguro de vida no puede ser negativo." });
+  }
+  if (!Number.isFinite(charges.damageInsurance) || charges.damageInsurance < 0) {
+    errors.push({ field: "charges", message: "El seguro de daños no puede ser negativo." });
+  }
+  if (!Number.isFinite(charges.adminFee) || charges.adminFee < 0) {
+    errors.push({ field: "charges", message: "La comisión mensual no puede ser negativa." });
+  }
+  if (
+    !Number.isFinite(charges.originationPercent) ||
+    charges.originationPercent < 0 ||
+    charges.originationPercent >= 100
+  ) {
+    errors.push({
+      field: "charges",
+      message: "La comisión de otorgamiento debe estar entre 0 % y 100 %.",
     });
   }
 

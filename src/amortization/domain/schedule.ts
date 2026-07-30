@@ -5,30 +5,47 @@ import {
   centsFromRaw,
   subCents,
   sumCents,
+  toAmount,
   type Cents,
 } from "./money";
 import { MAX_TERM_MONTHS, PREPAYMENT_STRATEGY, type ExtraPayment, type LoanTerms } from "./loan";
+import { chargesForPeriod, originationFee } from "./charges";
 
 export type ScheduleRow = {
   readonly period: number;
   readonly openingBalance: Cents;
-  /** What is actually charged this period: interest + scheduled principal. */
+  /** The loan installment alone: interest + scheduled principal. */
   readonly payment: Cents;
   readonly interest: Cents;
-  /** Principal repaid out of the scheduled installment. */
   readonly principal: Cents;
+  /** Insurance and fees owed this period, on top of the installment. */
+  readonly charges: Cents;
   /** Extra principal paid on top of the installment. */
   readonly extra: Cents;
+  /** Everything that actually leaves the borrower's pocket this period. */
+  readonly totalDue: Cents;
   readonly closingBalance: Cents;
 };
 
 export type Schedule = {
   readonly rows: readonly ScheduleRow[];
   readonly totalInterest: Cents;
+  readonly totalCharges: Cents;
+  readonly originationFee: Cents;
+  /** Sum of every monthly outflow. */
   readonly totalPaid: Cents;
+  /** Monthly outflows plus the one-off origination fee. */
+  readonly totalCost: Cents;
   readonly months: number;
   /** The level installment before any prepayment alters it. */
   readonly firstPayment: Cents;
+  /** First-period charges, i.e. the largest they will ever be. */
+  readonly firstCharges: Cents;
+  /**
+   * The rate that actually applies once charges are counted, annualised.
+   * Equals the nominal rate only when there are no charges at all.
+   */
+  readonly effectiveAnnualRatePercent: number;
 };
 
 /**
@@ -66,9 +83,48 @@ function groupExtrasByPeriod(extras: readonly ExtraPayment[]): ReadonlyMap<numbe
   return grouped;
 }
 
+function presentValue(outflows: readonly number[], rate: number): number {
+  let total = 0;
+  for (const [index, outflow] of outflows.entries()) {
+    total += outflow / Math.pow(1 + rate, index + 1);
+  }
+  return total;
+}
+
+/**
+ * The internal rate of return of the borrower's actual cash flows, annualised.
+ *
+ * Solved by bisection rather than Newton's method: present value is strictly
+ * decreasing in the rate, so bisection cannot diverge or need a derivative,
+ * and 200 halvings pin the answer far below display precision.
+ */
+export function effectiveAnnualRatePercent(
+  outflows: readonly number[],
+  netReceived: number,
+): number {
+  if (netReceived <= 0 || outflows.length === 0) return 0;
+
+  const totalOut = outflows.reduce((sum, outflow) => sum + outflow, 0);
+  if (totalOut <= netReceived) return 0;
+
+  let low = 0;
+  let high = 1;
+  while (presentValue(outflows, high) > netReceived && high < 1000) high *= 2;
+
+  for (let iteration = 0; iteration < 200; iteration += 1) {
+    const mid = (low + high) / 2;
+    if (presentValue(outflows, mid) > netReceived) low = mid;
+    else high = mid;
+  }
+
+  const monthly = (low + high) / 2;
+  return (Math.pow(1 + monthly, 12) - 1) * 100;
+}
+
 export function buildSchedule(terms: LoanTerms): Schedule {
   const rate = monthlyRate(terms.annualRatePercent);
   const extrasByPeriod = groupExtrasByPeriod(terms.extraPayments);
+  const upfrontFee = originationFee(terms.principal, terms.charges);
 
   const rows: ScheduleRow[] = [];
   let balance = terms.principal;
@@ -84,6 +140,7 @@ export function buildSchedule(terms: LoanTerms): Schedule {
     // original principal. This is the whole reason early periods barely move
     // the balance, and the reason a prepayment is worth so much more early.
     const interest = centsFromRaw(balance * rate);
+    const charges = chargesForPeriod(openingBalance, terms.charges);
 
     let principalPaid = subCents(installment, interest);
 
@@ -102,13 +159,17 @@ export function buildSchedule(terms: LoanTerms): Schedule {
     if (extra > balance) extra = balance;
     balance = subCents(balance, extra);
 
+    const payment = addCents(principalPaid, interest);
+
     rows.push({
       period,
       openingBalance,
-      payment: addCents(principalPaid, interest),
+      payment,
       interest,
       principal: principalPaid,
+      charges,
       extra,
+      totalDue: addCents(addCents(payment, charges), extra),
       closingBalance: balance,
     });
 
@@ -123,12 +184,23 @@ export function buildSchedule(terms: LoanTerms): Schedule {
     }
   }
 
+  const totalPaid = sumCents(rows.map((row) => row.totalDue));
+  const firstRow = rows[0];
+
   return {
     rows,
     totalInterest: sumCents(rows.map((row) => row.interest)),
-    totalPaid: sumCents(rows.map((row) => addCents(row.payment, row.extra))),
+    totalCharges: sumCents(rows.map((row) => row.charges)),
+    originationFee: upfrontFee,
+    totalPaid,
+    totalCost: addCents(totalPaid, upfrontFee),
     months: rows.length,
     firstPayment,
+    firstCharges: firstRow?.charges ?? ZERO,
+    effectiveAnnualRatePercent: effectiveAnnualRatePercent(
+      rows.map((row) => toAmount(row.totalDue)),
+      toAmount(subCents(terms.principal, upfrontFee)),
+    ),
   };
 }
 
